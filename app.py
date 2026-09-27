@@ -116,26 +116,48 @@ def login(page):
     if COOKIE_VALUE:
         log("📇 尝试 Cookie 登录...")
         try:
-            page.context.add_cookies([{
-                'name': 'remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d',
-                'value': COOKIE_VALUE,
-                'domain': 'dash.hidencloud.com',
-                'path': '/',
-                'expires': int(time.time()) + 3600 * 24 * 365,
-                'httpOnly': True,
-                'secure': True,
-                'sameSite': 'Lax'
-            }])
+            cookies_to_add = []
+            clean_val = COOKIE_VALUE.strip()
+            if "=" in clean_val or ";" in clean_val:
+                # 传入的是包含完整 Cookie 的字符串
+                for part in clean_val.split(';'):
+                    part = part.strip()
+                    if '=' in part:
+                        k, v = part.split('=', 1)
+                        cookies_to_add.append({
+                            'name': k.strip(),
+                            'value': v.strip(),
+                            'domain': 'dash.hidencloud.com',
+                            'path': '/',
+                            'expires': int(time.time()) + 3600 * 24 * 365,
+                            'httpOnly': True,
+                            'secure': True,
+                            'sameSite': 'Lax'
+                        })
+            else:
+                cookies_to_add.append({
+                    'name': 'remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d',
+                    'value': clean_val,
+                    'domain': 'dash.hidencloud.com',
+                    'path': '/',
+                    'expires': int(time.time()) + 3600 * 24 * 365,
+                    'httpOnly': True,
+                    'secure': True,
+                    'sameSite': 'Lax'
+                })
+            page.context.add_cookies(cookies_to_add)
+            log(f"🍪 已注入 {len(cookies_to_add)} 个 Cookie，正在打开控制台...")
             page.goto(f"{BASE_URL}/dashboard", wait_until="domcontentloaded", timeout=60000)
             handle_cloudflare(page)
+            time.sleep(3)
             page_title = page.title()
-            log(f"📝 当前Title: {page_title}")
+            log(f"📝 当前 URL: {page.url} | Title: {page_title}")
             if "auth/login" not in page.url:
                 log(f"✅ Cookie 登录成功！当前已到达dashboard页面")
                 return True
             log("❌ Cookie 失效，请更换")
-        except:
-            pass
+        except Exception as ce:
+            log(f"❌ 注入 Cookie 异常: {ce}")
 
     # 2. 账号密码登录
     if not EMAIL or not PASSWORD:
