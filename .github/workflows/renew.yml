@@ -12,6 +12,7 @@ permissions:
 jobs:
   Renew-HidenCloud:
     runs-on: ubuntu-latest
+    environment: '1'
     timeout-minutes: 15
 
     steps:
