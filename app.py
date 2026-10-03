@@ -585,6 +585,53 @@ def get_due_date(page):
         log(f"❌ 获取Due Date失败: {e}")
     return "未知"
 
+def inject_cookie_login(page):
+    """Re-inject COOKIE_VALUE after an unexpected redirect to the login page."""
+    if not COOKIE_VALUE:
+        return False
+    try:
+        clean_val = COOKIE_VALUE.strip()
+        cookies = []
+        if "=" in clean_val or ";" in clean_val:
+            for part in clean_val.split(";"):
+                part = part.strip()
+                if "=" not in part:
+                    continue
+                key, value = part.split("=", 1)
+                cookies.append({
+                    "name": key.strip(), "value": value.strip(),
+                    "domain": "dash.hidencloud.com", "path": "/",
+                    "expires": int(time.time()) + 3600 * 24 * 365,
+                    "httpOnly": True, "secure": True, "sameSite": "Lax",
+                })
+        else:
+            cookies.append({
+                "name": "remember_web_59ba36addc2b2f9401580f014c7f58ea4e30989d",
+                "value": clean_val, "domain": "dash.hidencloud.com", "path": "/",
+                "expires": int(time.time()) + 3600 * 24 * 365,
+                "httpOnly": True, "secure": True, "sameSite": "Lax",
+            })
+        page.context.add_cookies(cookies)
+        log(f"🍪 意外跳转登录页，已重新注入 {len(cookies)} 个 Cookie")
+        return True
+    except Exception as exc:
+        log(f"⚠️ 重新注入 Cookie 失败: {exc}")
+        return False
+
+
+def recover_renewal_session(page):
+    """Recover the authenticated service page after Cloudflare redirects to login."""
+    if "auth/login" not in page.url:
+        return True
+    log("⚠️ 创建发票后被重定向到登录页，恢复续期会话...")
+    if not inject_cookie_login(page):
+        return False
+    page.goto(SERVICE_URL, wait_until="domcontentloaded", timeout=60000)
+    if not solve_turnstile(page, timeout=90, success_check=page_ready, reload_after=8):
+        return False
+    return "auth/login" not in page.url
+
+
 def renew_service(page):
 
     try:
@@ -665,14 +712,23 @@ def renew_service(page):
 
         new_invoice_url = None
         start_wait = time.time()
-        while time.time() - start_wait < 90:
+        while time.time() - start_wait < 120:
             if "/payment/invoice/" in page.url:
                 new_invoice_url = page.url
                 log(f"🎉 页面已跳转: {new_invoice_url}")
                 break
+            if "auth/login" in page.url:
+                if recover_renewal_session(page):
+                    log("✅ 续期会话已恢复，重新寻找发票跳转...")
+                    start_wait = time.time()
+                    continue
+                log("❌ 无法恢复续期会话。")
+                break
             if page.locator('iframe[src*="challenges.cloudflare.com"]').count() > 0:
-                log("⚠️ 遇到拦截，尝试处理...")
-                solve_turnstile(page, timeout=45, reload_after=8)
+                log("⚠️ 遇到发票页拦截，处理 Turnstile...")
+                solve_turnstile(page, timeout=60, require_positive=True, reload_after=8)
+                if "auth/login" in page.url:
+                    recover_renewal_session(page)
             time.sleep(1)
 
         if not new_invoice_url:
